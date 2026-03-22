@@ -73,12 +73,32 @@ export interface XianxiaState {
   };
   factionReputation: Record<string, number>;
   npcRelations: Record<string, number>;
+  avatar: {
+    preset: "male" | "female" | "custom" | null;
+  };
+  pills: {
+    nourishQi: number;
+    heal: number;
+    focus: number;
+  };
+  lastPillQuality: "无" | "凡品" | "良品" | "上品";
+  pillToxicity: number;
+  focusBuffTurns: number;
+  idle: {
+    active: boolean;
+    startedAt: string | null;
+    endsAt: string | null;
+    scene: string | null;
+    reminderSentAt: string | null;
+  };
 }
 
 export interface OpenClawInbound {
   session_id: string;
   channel: Channel;
   channel_user_id: string;
+  global_user_id?: string;
+  user_id?: string;
   text: string;
   timestamp: string;
 }
@@ -113,10 +133,44 @@ export interface RuleViolation {
   message: string;
 }
 
+export interface XianxiaTurnEffect {
+  key: string;
+  label: string;
+  before: string | number | boolean | null;
+  after: string | number | boolean | null;
+}
+
+export interface XianxiaWorldChange {
+  key: string;
+  label: string;
+  value: string;
+}
+
+export interface XianxiaUiHints {
+  input_expected: string;
+  input_examples: string[];
+}
+
+export interface XianxiaStructuredTurn {
+  mode: "xianxia";
+  raw_input: string;
+  action_tag: string;
+  state_before: XianxiaState;
+  state_after: XianxiaState;
+  effects: XianxiaTurnEffect[];
+  violations: RuleViolation[];
+  world_changes: XianxiaWorldChange[];
+  suggestions: string[];
+  ui_hints: XianxiaUiHints;
+  media: string[];
+  fallback_text: string;
+}
+
 export interface XianxiaResolveResult {
   replyText: string;
   nextSuggestions: string[];
   state: XianxiaState;
   media: string[];
   violations: RuleViolation[];
+  structured: XianxiaStructuredTurn;
 }

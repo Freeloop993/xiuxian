@@ -1,10 +1,31 @@
 ﻿import type { FastifyInstance } from "fastify";
 import { resolveTurn } from "../core/engine.js";
-import { resolveXianxiaTurn } from "../core/xianxiaEngine.js";
-import type { GameMode, OpenClawInbound } from "../core/types.js";
+import { getInventoryItemsFromState, resolveXianxiaTurn } from "../core/xianxiaEngine.js";
+import type { GameMode, OpenClawInbound, XianxiaState } from "../core/types.js";
+import { startIdleReminderLoop } from "./idleReminder.js";
+import { enhanceXianxiaReplyWithOpenClaw } from "./openclawLlm.js";
 import { createRepo } from "../repo/repoFactory.js";
 
 const repo = createRepo();
+
+function normalizeXianxiaStateShape(state: XianxiaState): XianxiaState {
+  if (!state.avatar) {
+    state.avatar = { preset: null };
+  }
+  if (!state.pills) {
+    state.pills = { nourishQi: 1, heal: 1, focus: 0 };
+  }
+  if (!state.lastPillQuality) {
+    state.lastPillQuality = "无";
+  }
+  if (typeof state.pillToxicity !== "number") {
+    state.pillToxicity = 0;
+  }
+  if (typeof state.focusBuffTurns !== "number") {
+    state.focusBuffTurns = 0;
+  }
+  return state;
+}
 
 function toIdempotentKey(body: OpenClawInbound): string {
   return `${body.channel}:${body.channel_user_id}:${body.timestamp}`;
@@ -27,6 +48,7 @@ function detectModeSwitch(text: string): GameMode | null {
 
 export async function registerOpenClawRoutes(app: FastifyInstance): Promise<void> {
   await repo.init();
+  startIdleReminderLoop(repo, app.log);
 
   app.post<{ Body: OpenClawInbound }>("/webhooks/openclaw", async (request, reply) => {
     const body = request.body;
@@ -37,6 +59,7 @@ export async function registerOpenClawRoutes(app: FastifyInstance): Promise<void
     const userId = await repo.getOrCreateUser({
       channel: body.channel,
       channelUserId: body.channel_user_id,
+      globalUserId: body.global_user_id ?? body.user_id,
     });
 
     const switchTo = detectModeSwitch(body.text ?? "");
@@ -68,13 +91,20 @@ export async function registerOpenClawRoutes(app: FastifyInstance): Promise<void
 
     try {
       if (mode === "xianxia") {
-        const state = (await repo.getXianxiaState(userId)) ?? (await repo.createDefaultXianxiaState(userId));
+        const state = normalizeXianxiaStateShape((await repo.getXianxiaState(userId)) ?? (await repo.createDefaultXianxiaState(userId)));
         const resolved = resolveXianxiaTurn(state, body.text ?? "");
+        const enhancedReply = await enhanceXianxiaReplyWithOpenClaw({
+          state: resolved.state,
+          userText: body.text ?? "",
+          engineReply: resolved.replyText,
+          nextSuggestions: resolved.nextSuggestions,
+          violations: resolved.violations,
+        });
         await repo.saveXianxiaState(resolved.state);
         await repo.rememberRequest(idempotentKey);
 
         return reply.code(200).send({
-          reply_text: resolved.replyText,
+          reply_text: enhancedReply,
           game_state: {
             mode,
             step: resolved.state.step,
@@ -90,10 +120,19 @@ export async function registerOpenClawRoutes(app: FastifyInstance): Promise<void
             world_event: resolved.state.worldEvent,
             faction_reputation: resolved.state.factionReputation,
             npc_relations: resolved.state.npcRelations,
+            avatar: resolved.state.avatar,
+            pills: resolved.state.pills,
+            last_pill_quality: resolved.state.lastPillQuality,
+            pill_toxicity: resolved.state.pillToxicity,
+            focus_buff_turns: resolved.state.focusBuffTurns,
+            inventory_list: getInventoryItemsFromState(resolved.state),
+            inventory_text: getInventoryItemsFromState(resolved.state).join(", "),
+            idle: resolved.state.idle,
           },
           media: resolved.media,
           rule_violations: resolved.violations,
           next_suggestions: resolved.nextSuggestions,
+          structured_turn: resolved.structured,
         });
       }
 

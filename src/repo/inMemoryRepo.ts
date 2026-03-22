@@ -6,6 +6,7 @@ const identityKey = (identity: SessionIdentity): string => `${identity.channel}:
 
 export class InMemoryRepo implements GameRepo {
   private userByIdentity = new Map<string, string>();
+  private userByGlobalIdentity = new Map<string, string>();
   private stateByUser = new Map<string, LobsterState>();
   private xianxiaStateByUser = new Map<string, XianxiaState>();
   private modeByUser = new Map<string, GameMode>();
@@ -16,12 +17,39 @@ export class InMemoryRepo implements GameRepo {
   async getOrCreateUser(identity: SessionIdentity): Promise<string> {
     const key = identityKey(identity);
     const existing = this.userByIdentity.get(key);
-    if (existing) return existing;
+    const globalId = identity.globalUserId?.trim();
+    if (existing) {
+      if (globalId && !this.userByGlobalIdentity.has(globalId)) {
+        this.userByGlobalIdentity.set(globalId, existing);
+      }
+      return existing;
+    }
+
+    if (globalId) {
+      const existingByGlobal = this.userByGlobalIdentity.get(globalId);
+      if (existingByGlobal) {
+        this.userByIdentity.set(key, existingByGlobal);
+        return existingByGlobal;
+      }
+    }
 
     const userId = randomUUID();
     this.userByIdentity.set(key, userId);
+    if (globalId) {
+      this.userByGlobalIdentity.set(globalId, userId);
+    }
     this.modeByUser.set(userId, "lobster");
     return userId;
+  }
+
+  async getUserIdentities(userId: string): Promise<SessionIdentity[]> {
+    const list: SessionIdentity[] = [];
+    for (const [k, v] of this.userByIdentity.entries()) {
+      if (v !== userId) continue;
+      const [channel, channelUserId] = k.split(":");
+      list.push({ channel: channel as SessionIdentity["channel"], channelUserId });
+    }
+    return list;
   }
 
   async getMode(userId: string): Promise<GameMode> {
@@ -113,6 +141,24 @@ export class InMemoryRepo implements GameRepo {
         墨雨: 0,
         叶清霜: 0,
       },
+      avatar: {
+        preset: null,
+      },
+      pills: {
+        nourishQi: 1,
+        heal: 1,
+        focus: 0,
+      },
+      lastPillQuality: "无",
+      pillToxicity: 0,
+      focusBuffTurns: 0,
+      idle: {
+        active: false,
+        startedAt: null,
+        endsAt: null,
+        scene: null,
+        reminderSentAt: null,
+      },
     };
     this.xianxiaStateByUser.set(userId, state);
     return state;
@@ -120,6 +166,19 @@ export class InMemoryRepo implements GameRepo {
 
   async saveXianxiaState(state: XianxiaState): Promise<void> {
     this.xianxiaStateByUser.set(state.userId, state);
+  }
+
+  async listDueIdleXianxiaStates(nowIso: string): Promise<XianxiaState[]> {
+    const now = new Date(nowIso).getTime();
+    const due: XianxiaState[] = [];
+    for (const state of this.xianxiaStateByUser.values()) {
+      if (!state.idle.active || !state.idle.endsAt) continue;
+      if (state.idle.reminderSentAt) continue;
+      if (new Date(state.idle.endsAt).getTime() <= now) {
+        due.push(state);
+      }
+    }
+    return due;
   }
 
   async isDuplicate(key: string): Promise<boolean> {

@@ -1,0 +1,178 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>玄黄挂机面板</title>
+    <link rel="stylesheet" href="./styles.css?v=20260322f" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <h1>玄黄挂机控制台</h1>
+        <div class="session">
+          <label>渠道
+            <select id="channel">
+              <option value="other">other</option>
+              <option value="feishu">feishu</option>
+              <option value="wechat">wechat</option>
+              <option value="qq">qq</option>
+            </select>
+          </label>
+          <label>用户ID <input id="channelUserId" value="demo_user_001" /></label>
+          <button id="btnLoad">加载状态</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <div class="col-left">
+          <section class="panel panel-map">
+          <h2>世界地图（可点击探索）</h2>
+          <div class="map-wrap">
+            <img
+              id="mapImage"
+              src="./assets/map/world-map-main.png"
+              alt="world map"
+              onerror="this.src='https://dummyimage.com/1200x600/1f2f40/ffffff&text=world+map+placeholder';"
+            />
+            <button class="poi" data-scene="古修遗府" style="left:33%;top:18%"><span>遗府</span></button>
+            <button class="poi" data-scene="宗门驻地" style="left:72%;top:19%"><span>宗门</span></button>
+            <button class="poi" data-scene="天南坊市" style="left:19%;top:68%"><span>坊市</span></button>
+            <button class="poi" data-scene="乱星海岸" style="left:83%;top:81%"><span>海岸</span></button>
+          </div>
+          </section>
+
+          <section class="panel panel-intel">
+          <h2>世界情报台</h2>
+          <div class="intel-grid">
+            <div class="intel-card">
+              <div class="intel-k">当前目标</div>
+              <div id="intelGoal" class="intel-v">尚未加载</div>
+            </div>
+            <div class="intel-card">
+              <div class="intel-k">世界事件</div>
+              <div id="intelEvent" class="intel-v">尚未加载</div>
+            </div>
+            <div class="intel-card">
+              <div class="intel-k">事件阶段</div>
+              <div id="intelStage" class="intel-v">-</div>
+            </div>
+            <div class="intel-card">
+              <div class="intel-k">世界张力</div>
+              <div id="intelTension" class="intel-v">0</div>
+            </div>
+          </div>
+          <div id="intelTips" class="intel-tips">建议：先加载状态，再选择闭关、坊市或探索。</div>
+          </section>
+
+          <section class="panel panel-chat">
+            <h2>交互终端</h2>
+            <div id="log" class="log"></div>
+            <div class="composer">
+              <input id="input" placeholder="自然语言输入，例如：我先打坐修炼一会、去坊市买点药" />
+              <button id="btnSend">发送</button>
+            </div>
+            <div class="hint-text">推荐动作（随剧情变化）</div>
+            <div id="suggestionActions" class="quick-actions"></div>
+            <div class="hint-text">固定动作</div>
+            <div class="quick-actions">
+              <button data-cmd="切换修仙">切换修仙</button>
+              <button data-cmd="闭关修炼">闭关修炼</button>
+              <button data-cmd="去坊市">去坊市</button>
+              <button data-cmd="外出探索">外出探索</button>
+              <button data-cmd="开始挂机1小时">开始挂机1小时</button>
+              <button data-cmd="挂机状态">挂机状态</button>
+              <button data-cmd="领取挂机">领取挂机</button>
+              <button data-cmd="结束挂机">结束挂机</button>
+            </div>
+          </section>
+        </div>
+
+        <div class="col-right">
+          <section class="panel panel-state">
+          <h2>修行者状态</h2>
+          <pre id="stateText" class="state-ini">尚未加载</pre>
+          <div class="meters">
+            <div><span>HP</span><progress id="hpBar" max="100" value="0"></progress><b id="hpVal">0</b></div>
+            <div><span>MP</span><progress id="mpBar" max="100" value="0"></progress><b id="mpVal">0</b></div>
+            <div><span>修为</span><progress id="cvBar" max="100" value="0"></progress><b id="cvVal">0/0</b></div>
+            <div><span>丹毒</span><progress id="toxBar" max="100" value="0"></progress><b id="toxVal">0/100</b></div>
+          </div>
+          <div class="pill-summary">
+            <span id="pillSummary">丹药：纳气丹(0) / 回春丹(0) / 凝神丹(0)</span>
+            <span id="pillQuality">品质：无</span>
+            <span id="pillBuff">丹效：无</span>
+          </div>
+          </section>
+
+          <section class="panel panel-avatar">
+          <h2>角色立绘</h2>
+          <div class="avatar-preview-wrap">
+            <img
+              id="avatarPreview"
+              class="avatar-preview"
+              src="./assets/ui/avatar-male.png"
+              alt="avatar"
+              onerror="this.src='https://dummyimage.com/360x480/1b2b3a/ffffff&text=Avatar';"
+            />
+          </div>
+          <div class="avatar-actions">
+            <button id="btnAvatarMale">选择男修</button>
+            <button id="btnAvatarFemale">选择女修</button>
+            <label class="upload-label">
+              上传自定义
+              <input id="avatarUpload" type="file" accept="image/*" />
+            </label>
+          </div>
+          </section>
+
+          <section class="panel panel-idle">
+          <h2>挂机/闲置</h2>
+          <div class="idle-badge-wrap">
+            <img
+              id="idleBadge"
+              class="idle-badge"
+              src="./assets/ui/icon-idle-off.png"
+              alt="idle status"
+              onerror="this.src='https://dummyimage.com/72x72/223344/ffffff&text=IDLE';"
+            />
+            <div id="idleBadgeText" class="idle-badge-text">当前：未挂机</div>
+          </div>
+          <div class="idle-grid">
+            <div><label>挂机时长</label><input id="idleHours" type="number" min="1" value="1" /></div>
+            <div><label>预计结束</label><div id="idleEta">-</div></div>
+            <div><label>状态锁</label><div id="idleLock">未开启</div></div>
+          </div>
+          <div class="idle-actions">
+            <button id="btnIdleStart">开始挂机</button>
+            <button id="btnIdleClaim">领取挂机</button>
+            <button id="btnIdleExit">结束挂机</button>
+          </div>
+          </section>
+
+          <section class="panel panel-inv">
+          <h2>物品栏（文字模式）</h2>
+          <div class="inv-block">
+            <h3>丹药与消耗</h3>
+            <div id="inventoryPills" class="inventory"></div>
+          </div>
+          <div class="inv-block">
+            <h3>装备与材料</h3>
+            <div id="inventoryItems" class="inventory"></div>
+          </div>
+          <div class="inv-block">
+            <h3>任务与凭证</h3>
+            <div id="inventoryQuest" class="inventory"></div>
+          </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div id="assetDiag" style="position:fixed;right:12px;bottom:12px;background:#111b26d9;color:#d7e9ff;border:1px solid #43617d;border-radius:8px;padding:8px 10px;font-size:12px;z-index:9999;">
+      资源检测中...
+    </div>
+
+    <script type="module" src="./app.js?v=20260322f"></script>
+  </body>
+</html>

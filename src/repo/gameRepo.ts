@@ -3,6 +3,7 @@
 export interface SessionIdentity {
   channel: Channel;
   channelUserId: string;
+  globalUserId?: string;
 }
 
 export interface GameRepo {
@@ -18,6 +19,8 @@ export interface GameRepo {
   getXianxiaState(userId: string): Promise<XianxiaState | undefined>;
   createDefaultXianxiaState(userId: string): Promise<XianxiaState>;
   saveXianxiaState(state: XianxiaState): Promise<void>;
+  listDueIdleXianxiaStates(nowIso: string): Promise<XianxiaState[]>;
+  getUserIdentities(userId: string): Promise<SessionIdentity[]>;
 
   isDuplicate(key: string): Promise<boolean>;
   rememberRequest(key: string): Promise<void>;

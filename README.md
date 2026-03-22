@@ -50,6 +50,8 @@ npm run dev
 
 默认监听：`http://localhost:3000`
 
+前端控制台：`http://localhost:3000/`
+
 ### 3) 类型检查
 
 ```bash
@@ -96,6 +98,7 @@ npm run dev
 - `next_suggestions`
 - `media`（修仙模式关键媒体）
 - `rule_violations`（修仙模式规则错误码）
+- `structured_turn`（修仙模式结构化回合结果，推荐上层优先消费）
 
 详细协议见：[docs/api-spec-v0.1.md](docs/api-spec-v0.1.md)
 
@@ -132,3 +135,40 @@ git config --global --add safe.directory "E:/codex code/Game"
 ## License
 
 当前仓库未附带开源许可证（`No license`）。
+
+## OpenClaw LLM 叙事增强（推荐）
+
+修仙模式支持直接调用 OpenClaw 的 LLM 网关增强剧情叙事（不接第三方 LLM API）。
+
+设置以下环境变量即可启用：
+
+```bash
+OPENCLAW_LLM_URL=https://<你的-openclaw-llm-endpoint>
+OPENCLAW_MODEL=<你的模型名>
+OPENCLAW_API_KEY=<可选>
+```
+
+未设置 `OPENCLAW_LLM_URL` 时，系统会自动回退到规则引擎默认叙事文本。
+
+更多见：[docs/openclaw-llm-integration.md](docs/openclaw-llm-integration.md)
+
+## 推荐架构分层
+
+- 后端（本项目）负责：状态持久化、数值计算、规则校验、结构化回合输出。
+- OpenClaw LLM 负责：自然语言理解、叙事润色、沉浸式表达。
+- `reply_text` 仅用于兼容旧调用方；新接入建议优先使用 `structured_turn` 组织回复与 UI。
+
+
+## 挂机状态锁
+
+- 发送 开始挂机2小时 进入挂机状态锁。
+- 锁定期间不会推进剧情，只允许：挂机状态、领取挂机、结束挂机。
+- 到时后必须先领取或结束，才可继续普通交互。
+
+
+
+## Idle Reminder Integration
+
+- 挂机到时可通过 OpenClaw 主动推送提醒（可选启用）。
+- 配置见 [docs/idle-reminder.md](docs/idle-reminder.md)
+

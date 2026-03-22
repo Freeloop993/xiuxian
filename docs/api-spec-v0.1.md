@@ -41,3 +41,26 @@
 ## 仓储模式
 - 未设置 `DATABASE_URL`：内存仓储
 - 设置 `DATABASE_URL`：PostgreSQL 仓储（自动建表）
+
+## 跨平台账号互通
+
+默认按 `channel + channel_user_id` 识别用户，不同平台会被视为不同角色。
+
+现在已支持全局用户映射：
+- webhook 请求里传 `global_user_id`（推荐）
+- 或传 `user_id`
+
+当这两个字段任一存在时，系统会优先按全局ID合并用户，从而实现飞书/微信/QQ同一存档。
+
+请求示例：
+
+```json
+{
+  "session_id": "s_001",
+  "channel": "feishu",
+  "channel_user_id": "ou_xxx",
+  "global_user_id": "u_10086",
+  "text": "继续修炼",
+  "timestamp": "2026-03-22T12:00:00.000Z"
+}
+```

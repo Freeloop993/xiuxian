@@ -1,4 +1,14 @@
-﻿import type { RuleViolation, XianxiaResolveResult, XianxiaAttributes, XianxiaPlane, XianxiaState } from "./types.js";
+﻿import type {
+  RuleViolation,
+  XianxiaResolveResult,
+  XianxiaAttributes,
+  XianxiaPlane,
+  XianxiaState,
+  XianxiaStructuredTurn,
+  XianxiaTurnEffect,
+  XianxiaUiHints,
+  XianxiaWorldChange,
+} from "./types.js";
 import { guardXianxiaReply } from "./xianxiaGuard.js";
 import { appendMedia, MEDIA } from "./xianxiaMedia.js";
 import { blockedBreakthrough, validatePlayerInput } from "./xianxiaValidator.js";
@@ -47,27 +57,74 @@ function parseOrigin(text: string): "A" | "B" | "C" | null {
   return null;
 }
 
-function parseAttributes(text: string): XianxiaAttributes | null {
-  const normalized = text.replace(/：/g, ":").replace(/，/g, ",").replace(/\s+/g, "");
-  const keys = ["根骨", "悟性", "神魂", "机缘", "心智"];
-  const values: number[] = [];
+function parseAvatarSelection(input: string): "male" | "female" | "custom" | null {
+  if (input.includes("选择男修") || input.includes("男角色") || input.includes("男修")) return "male";
+  if (input.includes("选择女修") || input.includes("女角色") || input.includes("女修")) return "female";
+  if (input.includes("自定义立绘") || input.includes("上传立绘")) return "custom";
+  return null;
+}
 
-  for (const key of keys) {
-    const match = normalized.match(new RegExp(`${key}:(\\d{1,3})`));
-    if (!match) return null;
-    values.push(Number(match[1]));
+function normalizeNaturalInput(rawInput: string): string {
+  let input = rawInput.trim();
+  if (!input) return input;
+
+  const map: Array<{ reg: RegExp; to: string }> = [
+    { reg: /(打坐|冥想|修炼一会|闭关一会|先修炼|吐纳)/, to: "闭关修炼" },
+    { reg: /(逛坊市|去集市|去市场|买材料|采购)/, to: "去坊市" },
+    { reg: /(出门历练|出去探险|外出冒险|去野外|打怪)/, to: "外出探索" },
+    { reg: /(炼丹|练丹|炼制丹药|做丹药).*纳气/, to: "炼制纳气丹" },
+    { reg: /(炼丹|练丹|炼制丹药|做丹药).*(回春|回血|疗伤)/, to: "炼制回春丹" },
+    { reg: /(炼丹|练丹|炼制丹药|做丹药).*(凝神|回蓝|回法|专注)/, to: "炼制凝神丹" },
+    { reg: /(吃|嗑|服).*(纳气丹|修为丹)/, to: "服用纳气丹" },
+    { reg: /(吃|嗑|服).*(回春丹|回血丹|疗伤丹)/, to: "服用回春丹" },
+    { reg: /(吃|嗑|服).*(凝神丹|回蓝丹|回法丹|专注丹)/, to: "服用凝神丹" },
+    { reg: /(我要男|男主|男角色|选男|男修)/, to: "选择男修" },
+    { reg: /(我要女|女主|女角色|选女|女修)/, to: "选择女修" },
+  ];
+
+  for (const rule of map) {
+    if (rule.reg.test(input)) {
+      input = rule.to;
+      break;
+    }
+  }
+  return input;
+}
+
+function parseAttributes(text: string): XianxiaAttributes | null {
+  const normalized = text.replace(/，/g, ",");
+  const keyMap: Record<string, keyof XianxiaAttributes> = {
+    根骨: "physique",
+    悟性: "comprehension",
+    神魂: "soul",
+    机缘: "fortune",
+    心智: "willpower",
+  };
+
+  const picked = new Map<keyof XianxiaAttributes, number>();
+  const seenCn = new Set<string>();
+  const reg = /(根骨|悟性|神魂|机缘|心智)\s*(?:[:：=]?\s*)(\d{1,3})/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = reg.exec(normalized)) !== null) {
+    const cn = match[1];
+    const val = Number(match[2]);
+    if (seenCn.has(cn)) return null;
+    seenCn.add(cn);
+    picked.set(keyMap[cn], val);
   }
 
-  const total = values.reduce((sum, n) => sum + n, 0);
-  if (total !== 100) return null;
-
-  return {
-    physique: values[0],
-    comprehension: values[1],
-    soul: values[2],
-    fortune: values[3],
-    willpower: values[4],
+  if (picked.size !== 5) return null;
+  const attrs: XianxiaAttributes = {
+    physique: picked.get("physique") ?? 0,
+    comprehension: picked.get("comprehension") ?? 0,
+    soul: picked.get("soul") ?? 0,
+    fortune: picked.get("fortune") ?? 0,
+    willpower: picked.get("willpower") ?? 0,
   };
+  const total = Object.values(attrs).reduce((sum, n) => sum + n, 0);
+  if (total !== 100) return null;
+  return attrs;
 }
 
 function getStages(state: XianxiaState): RealmStage[] {
@@ -113,12 +170,108 @@ function advanceSmallStages(state: XianxiaState): string[] {
   return logs;
 }
 
+function applyPotionCommand(state: XianxiaState, input: string): string | null {
+  const rollQuality = (): "凡品" | "良品" | "上品" => {
+    const bonus = Math.floor(((state.attributes?.comprehension ?? 20) + (state.attributes?.fortune ?? 20)) / 20);
+    const r = Math.random() * 100 + bonus * 2;
+    if (r >= 90) return "上品";
+    if (r >= 55) return "良品";
+    return "凡品";
+  };
+  const toxicityDeltaByQuality: Record<"凡品" | "良品" | "上品", number> = {
+    凡品: 8,
+    良品: 4,
+    上品: 1,
+  };
+  const gainMulByQuality: Record<"凡品" | "良品" | "上品", number> = {
+    凡品: 1,
+    良品: 1.2,
+    上品: 1.45,
+  };
+
+  if (input.includes("炼制纳气丹")) {
+    if (state.spiritStone < 30) return "炼制失败：灵石不足（需要30）。";
+    state.spiritStone -= 30;
+    const q = rollQuality();
+    state.lastPillQuality = q;
+    state.pills.nourishQi += q === "上品" ? 2 : 1;
+    return `丹火一转，炼成${q}纳气丹。`;
+  }
+
+  if (input.includes("炼制回春丹")) {
+    if (state.spiritStone < 40) return "炼制失败：灵石不足（需要40）。";
+    state.spiritStone -= 40;
+    const q = rollQuality();
+    state.lastPillQuality = q;
+    state.pills.heal += q === "上品" ? 2 : 1;
+    return `药香凝而不散，炼成${q}回春丹。`;
+  }
+
+  if (input.includes("炼制凝神丹")) {
+    if (state.spiritStone < 60) return "炼制失败：灵石不足（需要60）。";
+    state.spiritStone -= 60;
+    const q = rollQuality();
+    state.lastPillQuality = q;
+    state.pills.focus += 1;
+    return `神识微震，炼成${q}凝神丹。`;
+  }
+
+  if (input.includes("服用纳气丹")) {
+    if (state.pills.nourishQi < 1) return "服用失败：纳气丹不足。";
+    state.pills.nourishQi -= 1;
+    const quality = state.lastPillQuality === "无" ? "凡品" : state.lastPillQuality;
+    const gain = Math.floor((24 + Math.floor((state.attributes?.comprehension ?? 20) / 5)) * gainMulByQuality[quality]);
+    state.cultivationCurrent += gain;
+    state.pillToxicity = Math.min(120, state.pillToxicity + toxicityDeltaByQuality[quality]);
+    const logs = advanceSmallStages(state);
+    return `丹力化开（${quality}），真元 +${gain}。${logs.join(" ")}`.trim();
+  }
+
+  if (input.includes("服用回春丹")) {
+    if (state.pills.heal < 1) return "服用失败：回春丹不足。";
+    state.pills.heal -= 1;
+    const quality = state.lastPillQuality === "无" ? "凡品" : state.lastPillQuality;
+    const heal = Math.floor(30 * gainMulByQuality[quality]);
+    state.hp = Math.min(100, state.hp + heal);
+    state.pillToxicity = Math.min(120, state.pillToxicity + toxicityDeltaByQuality[quality]);
+    return `药力温养经脉（${quality}），气血恢复 ${heal}。`;
+  }
+
+  if (input.includes("服用凝神丹")) {
+    if (state.pills.focus < 1) return "服用失败：凝神丹不足。";
+    state.pills.focus -= 1;
+    const quality = state.lastPillQuality === "无" ? "凡品" : state.lastPillQuality;
+    const turns = quality === "上品" ? 5 : quality === "良品" ? 4 : 3;
+    state.focusBuffTurns = Math.max(state.focusBuffTurns, turns);
+    state.pillToxicity = Math.min(120, state.pillToxicity + toxicityDeltaByQuality[quality]);
+    return `识海清明（${quality}），获得${turns}回合凝神修炼加成。`;
+  }
+
+  return null;
+}
+
 function itemLine(state: XianxiaState): string {
+  return getInventoryItemsFromState(state).join(", ");
+}
+
+export function getInventoryItemsFromState(state: XianxiaState): string[] {
   const parts = ["低阶纳气丹 x2", "粗制匕首 x1"];
   if (state.foundationPill > 0) parts.push(`筑基丹 x${state.foundationPill}`);
   if (state.insightRelic > 0) parts.push(`悟道之物 x${state.insightRelic}`);
   if (state.spiritEyeAccess) parts.push("通天灵眼令牌 x1");
-  return parts.join(", ");
+  if (state.pills.nourishQi > 0) parts.push(`纳气丹 x${state.pills.nourishQi}`);
+  if (state.pills.heal > 0) parts.push(`回春丹 x${state.pills.heal}`);
+  if (state.pills.focus > 0) parts.push(`凝神丹 x${state.pills.focus}`);
+  return parts;
+}
+
+function formatIdleRemainMs(ms: number): string {
+  if (ms <= 0) return "0分钟";
+  const totalMin = Math.ceil(ms / (60 * 1000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h > 0) return `${h}小时${m}分钟`;
+  return `${m}分钟`;
 }
 
 function cultivationLine(state: XianxiaState): string {
@@ -133,11 +286,15 @@ function buildStatusIni(state: XianxiaState): string {
   const attrLine = x
     ? `根骨${x.physique}/悟性${x.comprehension}/神魂${x.soul}/机缘${x.fortune}/心智${x.willpower}`
     : "待分配";
+  const avatar = state.avatar.preset === null ? "未选择" : state.avatar.preset;
+  const buffLine = state.focusBuffTurns > 0 ? `凝神加成(${state.focusBuffTurns}回合)` : "无";
+  const toxLevel = state.pillToxicity >= 80 ? "高" : state.pillToxicity >= 40 ? "中" : "低";
 
   return [
     "```ini",
     "[修行者状态]",
     `📜 名  号 : ${state.name}`,
+    `👤 立  绘 : ${avatar}`,
     `⛰️ 境  界 : ${state.realm}`,
     `💪 肉  身 : ${state.bodyRealm}`,
     `🧠 神  识 : ${state.soulRealm} (无)`,
@@ -145,15 +302,82 @@ function buildStatusIni(state: XianxiaState): string {
     `💎 道  印 : ${state.daoSealCount > 0 ? `${state.daoSealCount} 枚` : "暂无"}`,
     "📖 功  法 : 青元纳气诀, 无",
     `🏺 物  品 : ${itemLine(state)}`,
+    `💊 丹  药 : 纳气丹(${state.pills.nourishQi})/回春丹(${state.pills.heal})/凝神丹(${state.pills.focus})`,
+    `🧪 品  质 : ${state.lastPillQuality}`,
+    `☣️ 丹  毒 : ${state.pillToxicity}/100 (${toxLevel})`,
+    `🔮 丹  效 : ${buffLine}`,
     `💰 资  产 : 灵石 ${state.spiritStone} / 仙元石 ${state.immortalStone}`,
     `❤️ 状  态 : HP ${state.hp}/100, MP ${state.mp}/100, 健康`,
     `💀 煞  气 : ${state.shaQi} (轻微)`,
     `🎯 目  标 : ${state.goal}`,
     `🐾 灵  兽 : ${state.beastName} ([状态: ${state.beastStage}], [等级: ${state.beastLevel}])`,
     `🔗 关  系 : ${state.relationSummary}`,
-    `🧬 先天 : ${attrLine}`,
+    `🧬 先  天 : ${attrLine}`,
     "```",
   ].join("\n");
+}
+
+function cloneState(state: XianxiaState): XianxiaState {
+  return JSON.parse(JSON.stringify(state)) as XianxiaState;
+}
+
+function summarizeEffects(before: XianxiaState, after: XianxiaState): XianxiaTurnEffect[] {
+  const effects: XianxiaTurnEffect[] = [];
+  const pushIfChanged = (key: string, label: string, b: string | number | boolean | null, a: string | number | boolean | null): void => {
+    if (b === a) return;
+    effects.push({ key, label, before: b, after: a });
+  };
+
+  pushIfChanged("name", "名号", before.name, after.name);
+  pushIfChanged("step", "流程阶段", before.step, after.step);
+  pushIfChanged("origin", "出身", before.origin, after.origin);
+  pushIfChanged("plane", "位面", before.plane, after.plane);
+  pushIfChanged("realm", "境界", before.realm, after.realm);
+  pushIfChanged("goal", "目标", before.goal, after.goal);
+  pushIfChanged("spiritStone", "灵石", before.spiritStone, after.spiritStone);
+  pushIfChanged("hp", "生命", before.hp, after.hp);
+  pushIfChanged("mp", "法力", before.mp, after.mp);
+  pushIfChanged("avatar", "立绘", before.avatar.preset, after.avatar.preset);
+  pushIfChanged("pill.nourishQi", "纳气丹", before.pills.nourishQi, after.pills.nourishQi);
+  pushIfChanged("pill.heal", "回春丹", before.pills.heal, after.pills.heal);
+  pushIfChanged("pill.focus", "凝神丹", before.pills.focus, after.pills.focus);
+  pushIfChanged("focusBuffTurns", "凝神回合", before.focusBuffTurns, after.focusBuffTurns);
+
+  return effects;
+}
+
+function summarizeWorldChanges(before: XianxiaState, after: XianxiaState): XianxiaWorldChange[] {
+  const changes: XianxiaWorldChange[] = [];
+  if (before.worldEvent.stage !== after.worldEvent.stage) {
+    changes.push({ key: "world.stage", label: "世界事件阶段", value: `${before.worldEvent.stage} -> ${after.worldEvent.stage}` });
+  }
+  if (before.worldEvent.tension !== after.worldEvent.tension) {
+    changes.push({ key: "world.tension", label: "世界张力", value: `${before.worldEvent.tension} -> ${after.worldEvent.tension}` });
+  }
+  return changes;
+}
+
+function detectUiHints(state: XianxiaState): XianxiaUiHints {
+  if (state.step === "ask_name") {
+    return { input_expected: "请输入名号（可先选立绘）", input_examples: ["选择男修", "选择女修", "韩立"] };
+  }
+  if (state.step === "ask_origin") {
+    return { input_expected: "请输入出身选项 A/B/C", input_examples: ["A", "B", "C"] };
+  }
+  if (state.step === "ask_attr") {
+    return { input_expected: "请输入五项先天属性，总和100", input_examples: ["根骨20 悟性20 神魂20 机缘20 心智20"] };
+  }
+  return { input_expected: "请输入行动", input_examples: ["闭关修炼", "炼制纳气丹", "服用纳气丹", "去坊市"] };
+}
+
+function inferActionTag(before: XianxiaState, after: XianxiaState, rawInput: string): string {
+  if (before.step === "ask_name" && after.step === "ask_name") return "onboarding";
+  if (before.step === "ask_name" && after.step === "ask_origin") return "name_setup";
+  if (before.step === "ask_origin") return "origin_setup";
+  if (before.step === "ask_attr") return "attribute_setup";
+  if (rawInput.includes("选择男修") || rawInput.includes("选择女修") || rawInput.includes("自定义立绘")) return "avatar_setup";
+  if (rawInput.includes("炼制") || rawInput.includes("服用")) return "alchemy";
+  return detectActionTag(rawInput, false);
 }
 
 function finalizeReply(
@@ -162,16 +386,27 @@ function finalizeReply(
   nextSuggestions: string[],
   media: string[],
   violations: RuleViolation[] = [],
+  meta?: { rawInput?: string; actionTag?: string; stateBefore?: XianxiaState },
 ): XianxiaResolveResult {
   const isDaozuPeak = state.realm.includes("道祖") && state.realm.includes("大圆满");
   const guarded = guardXianxiaReply(replyText, state.plane, isDaozuPeak);
-  return {
-    replyText: guarded,
-    nextSuggestions,
-    state,
-    media,
+  const before = meta?.stateBefore ?? cloneState(state);
+  const structured: XianxiaStructuredTurn = {
+    mode: "xianxia",
+    raw_input: meta?.rawInput ?? "",
+    action_tag: meta?.actionTag ?? inferActionTag(before, state, meta?.rawInput ?? ""),
+    state_before: before,
+    state_after: cloneState(state),
+    effects: summarizeEffects(before, state),
     violations,
+    world_changes: summarizeWorldChanges(before, state),
+    suggestions: nextSuggestions,
+    ui_hints: detectUiHints(state),
+    media,
+    fallback_text: guarded,
   };
+
+  return { replyText: guarded, nextSuggestions, state, media, violations, structured };
 }
 
 function tryMajorBreakthrough(state: XianxiaState, input: string): { scene?: string; violations?: RuleViolation[]; media: string[] } {
@@ -184,128 +419,23 @@ function tryMajorBreakthrough(state: XianxiaState, input: string): { scene?: str
     if (state.foundationPill < 1) {
       return { media, violations: blockedBreakthrough("筑基失败：缺少筑基丹。") };
     }
-
     state.foundationPill -= 1;
     state.cultivationCurrent = 0;
     applyStage(state, getStages(state).findIndex((s) => s.realm === "筑基期·前期"));
-    return { media, scene: "丹田气海凝实成台，灵液初成，成功踏入**筑基期·前期**。" };
+    return { media, scene: "丹田气海凝实成台，成功踏入筑基期·前期。" };
   }
 
   if (input.includes("尝试结丹")) {
-    const willpower = state.attributes?.willpower ?? 0;
     if (state.realm !== "筑基期·后期" || state.cultivationCurrent < state.cultivationMax) {
       return { media, violations: blockedBreakthrough("结丹失败：需先达到筑基后期圆满。") };
     }
-    if (willpower < 20) {
+    if ((state.attributes?.willpower ?? 0) < 20) {
       return { media, violations: blockedBreakthrough("结丹失败：心智不足，难渡心魔。") };
     }
-    if (state.spiritStone < 3000) {
-      return { media, violations: blockedBreakthrough("结丹失败：灵石不足，至少需要 3000。") };
-    }
-
-    state.spiritStone -= 3000;
     state.cultivationCurrent = 0;
     applyStage(state, getStages(state).findIndex((s) => s.realm === "结丹期·前期"));
     media = appendMedia(media, MEDIA.JIEDAN);
-    return { media, scene: "心魔劫散，金丹凝成，灵压骤升，境界踏入**结丹期·前期**。" };
-  }
-
-  if (input.includes("尝试元婴")) {
-    if (state.realm !== "结丹期·后期" || state.cultivationCurrent < state.cultivationMax) {
-      return { media, violations: blockedBreakthrough("元婴失败：需先达到结丹后期圆满。") };
-    }
-    if (!state.spiritEyeAccess) {
-      return { media, violations: blockedBreakthrough("元婴失败：未取得通天灵眼资格。") };
-    }
-    if (state.spiritStone < 5000) {
-      return { media, violations: blockedBreakthrough("元婴失败：灵石不足，至少需要 5000。") };
-    }
-
-    state.spiritStone -= 5000;
-    state.cultivationCurrent = 0;
-    applyStage(state, getStages(state).findIndex((s) => s.realm === "元婴期·前期"));
-    return { media, scene: "金丹碎而不散，元婴初啼，神识暴涨，成功晋入**元婴期·前期**。" };
-  }
-
-  if (input.includes("尝试化神")) {
-    if (state.realm !== "元婴期·后期" || state.cultivationCurrent < state.cultivationMax) {
-      return { media, violations: blockedBreakthrough("化神失败：需先达到元婴后期圆满。") };
-    }
-    if (state.insightRelic < 1) {
-      return { media, violations: blockedBreakthrough("化神失败：缺少悟道之物。") };
-    }
-    if (state.spiritStone < 8000) {
-      return { media, violations: blockedBreakthrough("化神失败：灵石不足，至少需要 8000。") };
-    }
-
-    state.insightRelic -= 1;
-    state.spiritStone -= 8000;
-    state.cultivationCurrent = 0;
-    applyStage(state, getStages(state).findIndex((s) => s.realm === "化神期·前期"));
-    return { media, scene: "元神蜕变，神念通明，终于触及法则边缘，踏入**化神期·前期**。" };
-  }
-
-  if (input.includes("尝试合体") && state.plane === "spirit") {
-    if (state.realm !== "炼虚期·后期" || state.cultivationCurrent < state.cultivationMax) {
-      return { media, violations: blockedBreakthrough("合体失败：需先达到炼虚后期圆满。") };
-    }
-    if (state.insightRelic < 1 || state.spiritStone < 12000) {
-      return { media, violations: blockedBreakthrough("合体失败：需要悟道之物 x1 与灵石 12000。") };
-    }
-
-    state.insightRelic -= 1;
-    state.spiritStone -= 12000;
-    state.cultivationCurrent = 0;
-    applyStage(state, getStages(state).findIndex((s) => s.realm === "合体期·前期"));
-    return { media, scene: "法身初成，元神与肉身同频共振，晋入**合体期·前期**。" };
-  }
-
-  if (input.includes("尝试大乘") && state.plane === "spirit") {
-    const willpower = state.attributes?.willpower ?? 0;
-    if (state.realm !== "合体期·后期" || state.cultivationCurrent < state.cultivationMax) {
-      return { media, violations: blockedBreakthrough("大乘失败：需先达到合体后期圆满。") };
-    }
-    if (willpower < 30 || state.spiritStone < 20000) {
-      return { media, violations: blockedBreakthrough("大乘失败：心智需达到30且灵石需达到20000。") };
-    }
-
-    state.spiritStone -= 20000;
-    state.cultivationCurrent = 0;
-    applyStage(state, getStages(state).findIndex((s) => s.realm === "大乘期·前期"));
-    media = appendMedia(media, MEDIA.DACHENG);
-    return { media, scene: "天地三劫尽散，领域初张，修为跨入**大乘期·前期**。" };
-  }
-
-  if (input.includes("尝试飞升")) {
-    if (state.plane === "human") {
-      if (state.realm !== "化神期·后期" || state.cultivationCurrent < state.cultivationMax) {
-        return { media, violations: blockedBreakthrough("飞升失败：需先达到化神后期圆满。") };
-      }
-      state.plane = "spirit";
-      state.realm = "炼虚期·前期";
-      state.cultivationCurrent = 0;
-      state.cultivationMax = 10000;
-      state.goal = "[飞升灵界] 立足风元大陆，补齐炼虚资源";
-      media = appendMedia(media, MEDIA.ASCEND_SPIRIT);
-      return { media, scene: "通道撕裂，天劫轰鸣，身形穿过界壁，已飞升至**灵界**。" };
-    }
-
-    if (state.plane === "spirit") {
-      if (state.realm !== "大乘期·后期" || state.cultivationCurrent < state.cultivationMax) {
-        return { media, violations: blockedBreakthrough("飞升失败：需先达到大乘后期圆满。") };
-      }
-      state.plane = "immortal";
-      state.realm = "真仙·初期";
-      state.cultivationCurrent = 0;
-      state.cultivationMax = 0;
-      state.lawPercent = 0;
-      state.immortalStone += 120;
-      state.goal = "[飞升仙界] 参悟法则并尝试凝聚道印";
-      media = appendMedia(media, MEDIA.ASCEND_IMMORTAL);
-      return { media, scene: "大道震荡，仙门洞开，历经劫火后踏入**仙界真仙境**。" };
-    }
-
-    return { media, violations: blockedBreakthrough("当前已在仙界，无需再次飞升。") };
+    return { media, scene: "心魔劫散，金丹凝成，境界踏入结丹期·前期。" };
   }
 
   if (state.plane === "immortal" && input.includes("尝试凝印")) {
@@ -315,177 +445,256 @@ function tryMajorBreakthrough(state: XianxiaState, input: string): { scene?: str
     state.lawPercent = 0;
     state.daoSealCount += 1;
     media = appendMedia(media, MEDIA.JINXIAN);
-    return { media, scene: `道火炼魂而不灭，成功凝聚第 ${state.daoSealCount} 枚**道印**。` };
+    return { media, scene: `道火炼魂而不灭，成功凝聚第 ${state.daoSealCount} 枚道印。` };
   }
 
   return { media };
 }
 
 export function resolveXianxiaTurn(state: XianxiaState, text: string): XianxiaResolveResult {
-  const input = text.trim();
+  const rawInput = text.trim();
+  const input = normalizeNaturalInput(rawInput);
+  const turnStateBefore = cloneState(state);
+  const finalize = (
+    nextState: XianxiaState,
+    replyText: string,
+    nextSuggestions: string[],
+    media: string[],
+    violations: RuleViolation[] = [],
+    actionTag?: string,
+  ): XianxiaResolveResult =>
+    finalizeReply(nextState, replyText, nextSuggestions, media, violations, {
+      rawInput,
+      actionTag,
+      stateBefore: turnStateBefore,
+    });
+
+  const avatarSelection = parseAvatarSelection(input);
+  if (avatarSelection) {
+    state.avatar.preset = avatarSelection;
+    const avatarLabel = avatarSelection === "male" ? "男修" : avatarSelection === "female" ? "女修" : "自定义";
+    return finalize(state, [`立绘已切换为：${avatarLabel}。`, buildStatusIni(state)].join("\n\n"), ["报名号", "A", "B", "C"], [], [], "avatar_setup");
+  }
+
+  const wantsStartIdle =
+    /(开始|先|我要|去)?\s*挂机/.test(input) &&
+    !/(挂机状态|查看挂机|领取挂机|结算挂机|结束挂机|停止挂机|退出挂机)/.test(input);
+  if (wantsStartIdle) {
+    const m = input.match(/(\d+)\s*小时/);
+    const hours = Math.max(1, Math.min(24, Number(m?.[1] ?? 1)));
+    const start = new Date();
+    const end = new Date(start.getTime() + hours * 60 * 60 * 1000);
+    state.idle.active = true;
+    state.idle.startedAt = start.toISOString();
+    state.idle.endsAt = end.toISOString();
+    state.idle.reminderSentAt = null;
+    state.idle.scene = "洞府闭关";
+    return finalize(
+      state,
+      [`已进入挂机历练：${hours}小时。挂机期间开启状态锁，仅可【挂机状态/领取挂机/结束挂机】。`, buildStatusIni(state)].join("\n\n"),
+      ["挂机状态", "领取挂机", "结束挂机"],
+      [],
+      [],
+      "idle_start",
+    );
+  }
+
+  if (input.includes("挂机状态") || input.includes("查看挂机")) {
+    const now = Date.now();
+    const ends = state.idle.endsAt ? new Date(state.idle.endsAt).getTime() : null;
+    const remain = state.idle.active && ends ? formatIdleRemainMs(ends - now) : "未挂机";
+    return finalize(
+      state,
+      [`挂机状态：${state.idle.active ? "进行中" : "未开启"}。剩余：${remain}。`, buildStatusIni(state)].join("\n\n"),
+      state.idle.active ? ["领取挂机", "结束挂机"] : ["开始挂机1小时", "闭关修炼"],
+      [],
+      [],
+      "idle_status",
+    );
+  }
+
+  if (input.includes("领取挂机") || input.includes("结算挂机")) {
+    if (!state.idle.active || !state.idle.endsAt) {
+      return finalize(state, "当前没有可领取的挂机收益。", ["开始挂机1小时", "闭关修炼"], [], [], "idle_claim");
+    }
+    const now = Date.now();
+    const startTs = state.idle.startedAt ? new Date(state.idle.startedAt).getTime() : now;
+    const endTs = new Date(state.idle.endsAt).getTime();
+    if (now < endTs) {
+      return finalize(
+        state,
+        `挂机尚未结束，仍需等待 ${formatIdleRemainMs(endTs - now)}。`,
+        ["挂机状态", "结束挂机"],
+        [],
+        [],
+        "idle_claim",
+      );
+    }
+    const hours = Math.max(1, Math.floor((endTs - startTs) / (60 * 60 * 1000)));
+    const stoneGain = 10 * hours + Math.floor((state.attributes?.fortune ?? 20) / 10) * hours;
+    const cvGain = 12 * hours + Math.floor((state.attributes?.comprehension ?? 20) / 10) * hours;
+    state.spiritStone += stoneGain;
+    state.cultivationCurrent += cvGain;
+    state.pillToxicity = Math.max(0, state.pillToxicity - hours);
+    const logs = advanceSmallStages(state);
+    state.idle.active = false;
+    state.idle.startedAt = null;
+    state.idle.endsAt = null;
+    state.idle.scene = null;
+    state.idle.reminderSentAt = null;
+    return finalize(
+      state,
+      [`挂机结算完成：灵石 +${stoneGain}，真元 +${cvGain}。${logs.join(" ")}`.trim(), buildStatusIni(state)].join("\n\n"),
+      ["闭关修炼", "去坊市", "外出探索"],
+      [],
+      [],
+      "idle_claim",
+    );
+  }
+
+  if (input.includes("结束挂机") || input.includes("停止挂机") || input.includes("退出挂机")) {
+    if (!state.idle.active) {
+      return finalize(state, "当前未处于挂机状态。", ["开始挂机1小时"], [], [], "idle_end");
+    }
+    state.idle.active = false;
+    state.idle.startedAt = null;
+    state.idle.endsAt = null;
+    state.idle.scene = null;
+    state.idle.reminderSentAt = null;
+    return finalize(state, "已手动结束挂机，状态锁解除。", ["闭关修炼", "去坊市", "外出探索"], [], [], "idle_end");
+  }
+
+  if (state.idle.active) {
+    return finalize(
+      state,
+      ["当前处于挂机状态锁。请先【领取挂机】或【结束挂机】后再进行剧情交互。", buildStatusIni(state)].join("\n\n"),
+      ["挂机状态", "领取挂机", "结束挂机"],
+      [],
+      [],
+      "idle_locked",
+    );
+  }
+
   const preViolations = validatePlayerInput(state, input);
   if (preViolations.length > 0) {
-    const replyText = [
-      "天道示警：当前行为不合此界法则。",
-      ...preViolations.map((v) => `- ${v.code}: ${v.message}`),
-      buildStatusIni(state),
-    ].join("\n\n");
-
-    return finalizeReply(state, replyText, ["闭关修炼", "去坊市", "外出探索"], [], preViolations);
+    return finalize(
+      state,
+      ["天道示警：当前行为不合此界法则。", ...preViolations.map((v) => `- ${v.code}: ${v.message}`), buildStatusIni(state)].join("\n\n"),
+      ["闭关修炼", "去坊市", "外出探索"],
+      [],
+      preViolations,
+      "rule_violation",
+    );
   }
 
   if (state.step === "ask_name") {
     if (!input || input === "开始" || input === "开始修仙") {
-      return finalizeReply(
+      return finalize(
         state,
-        ["天地初开，玄黄分野，命数在长夜中缓缓转动。", "修行之路先立真名，今请报上名号。"].join("\n\n"),
-        ["报上姓名"],
+        ["天地初开，玄黄分野。", "修行之路先立真名，今请报上名号（可先选择男修/女修）。"].join("\n\n"),
+        ["选择男修", "选择女修", "报上姓名"],
         [],
+        [],
+        "onboarding",
       );
     }
-
     state.name = input.slice(0, 16);
     state.step = "ask_origin";
-    return finalizeReply(
-      state,
-      [
-        `真灵已定，其名为**${state.name}**。`,
-        "请择一处出身之地：",
-        "> A. 天南之地 · 越国山村",
-        "> B. 乱星之海 · 海岛渔村",
-        "> C. 大晋王朝 · 没落世家",
-      ].join("\n\n"),
-      ["A", "B", "C"],
-      [],
-    );
+    return finalize(state, [`真灵已定，其名为**${state.name}**。`, "请选择出身：A/B/C"].join("\n\n"), ["A", "B", "C"], [], [], "name_setup");
   }
 
   if (state.step === "ask_origin") {
     const origin = parseOrigin(input);
-    if (!origin) return finalizeReply(state, "命格未定，请在 A/B/C 中择其一。", ["A", "B", "C"], []);
+    if (!origin) return finalize(state, "命格未定，请在 A/B/C 中择其一。", ["A", "B", "C"], [], [], "origin_setup");
 
     state.origin = origin;
-    if (origin === "A") {
-      state.goal = "[先天分配] 山村出身，道心更稳";
-    } else if (origin === "B") {
-      state.bodyRealm = "后天锻体";
-      state.goal = "[先天分配] 渔村出身，体魄占优";
-    } else {
-      state.soulRealm = "灵境雏形";
-      state.goal = "[先天分配] 世家出身，神识占优";
-    }
-
+    if (origin === "B") state.bodyRealm = "后天锻体";
+    if (origin === "C") state.soulRealm = "灵境雏形";
     state.step = "ask_attr";
-    return finalizeReply(
+    return finalize(
       state,
-      [
-        "出身已定，天道赐下 100 点先天道蕴。",
-        "请按格式分配：`根骨:20,悟性:20,神魂:20,机缘:20,心智:20`（总和必须为100）。",
-      ].join("\n\n"),
-      ["根骨:20,悟性:20,神魂:20,机缘:20,心智:20"],
+      "出身已定。请分配 100 点先天道蕴（根骨、悟性、神魂、机缘、心智）。",
+      ["根骨20 悟性20 神魂20 机缘20 心智20"],
       [],
+      [],
+      "origin_setup",
     );
   }
 
   if (state.step === "ask_attr") {
     const attrs = parseAttributes(input);
     if (!attrs) {
-      return finalizeReply(
-        state,
-        "先天分配无效。请严格使用格式并确保总和为100。",
-        ["根骨:20,悟性:20,神魂:20,机缘:20,心智:20"],
-        [],
-      );
+      return finalize(state, "先天分配无效，请确保五项齐全且总和为100。", ["根骨20 悟性20 神魂20 机缘20 心智20"], [], [], "attribute_setup");
     }
-
     state.attributes = attrs;
     state.step = "in_world";
     state.goal = "[自由探索] 先稳固炼气修为，再寻筑基线索";
-
-    return finalizeReply(
+    return finalize(
       state,
-      [
-        "命数成形，修行正式开始。晨雾沿着屋檐滑落，灵气稀薄却并未断绝。",
-        "> A. 就地闭关一月，稳固纳气",
-        "> B. 前往坊市，打探功法与丹药价格",
-        "> C. 出村探路，寻找机缘",
-        buildStatusIni(state),
-      ].join("\n\n"),
-      ["闭关修炼", "去坊市", "外出探索", "购买筑基丹"],
+      ["命数成形，修行正式开始。", "> A. 闭关修炼", "> B. 去坊市", "> C. 外出探索", "> D. 炼制纳气丹/回春丹/凝神丹", buildStatusIni(state)].join("\n\n"),
+      ["闭关修炼", "去坊市", "外出探索", "炼制纳气丹", "服用纳气丹"],
       [],
+      [],
+      "attribute_setup",
     );
   }
 
-  const beforeRealm = state.realm;
   let media: string[] = [];
   let scene = "";
   let usedMajorBreakthrough = false;
 
   const major = tryMajorBreakthrough(state, input);
   media = appendMedia(media, ...major.media);
-
   if (major.violations) {
-    return finalizeReply(
-      state,
-      [
-        "天道压下劫门，突破条件尚未齐备。",
-        ...major.violations.map((v) => `- ${v.code}: ${v.message}`),
-        buildStatusIni(state),
-      ].join("\n\n"),
-      ["闭关修炼", "去坊市", "外出探索"],
-      media,
-      major.violations,
-    );
+    return finalize(state, ["天道压下劫门，突破条件尚未齐备。", ...major.violations.map((v) => `- ${v.code}: ${v.message}`), buildStatusIni(state)].join("\n\n"), ["闭关修炼", "去坊市", "外出探索"], media, major.violations, "breakthrough");
   }
-
   if (major.scene) {
     scene = major.scene;
     usedMajorBreakthrough = true;
-  } else if (state.plane === "immortal" && (input.includes("闭关") || input.includes("参悟"))) {
-    const gain = 2 + Math.floor((state.attributes?.comprehension ?? 20) / 20);
-    state.lawPercent = Math.min(100, state.lawPercent + gain);
-    state.goal = "[仙界参悟] 提升法则领悟并尝试凝印";
-    scene = `你在仙域边界盘坐三日，法则纹理渐明，法则领悟 +${gain}%。`;
-  } else if (input.includes("购买筑基丹")) {
-    if (state.spiritStone < 500) {
-      scene = "坊市摊主只看了一眼储物袋，摇头不语：灵石不足，暂不可得筑基丹。";
-    } else {
-      state.spiritStone -= 500;
-      state.foundationPill += 1;
-      scene = "你在暗铺中购得一枚筑基丹，丹纹尚稳，先收于玉匣。";
+  }
+
+  if (!scene) {
+    const potionScene = applyPotionCommand(state, input);
+    if (potionScene) {
+      scene = potionScene;
+      state.goal = "[丹药调理] 以丹药稳固修为与状态";
     }
-  } else if (input.includes("购买悟道") || input.includes("购买悟道之物")) {
-    if (state.spiritStone < 1200) {
-      scene = "悟道之物有价无市，灵石不足，线索被他人先一步拿走。";
-    } else {
-      state.spiritStone -= 1200;
-      state.insightRelic += 1;
-      scene = "你以高价换得一块残缺悟道碑，神识触及其上时隐有共鸣。";
-    }
-  } else if (input.includes("闭关") || input.includes("修炼")) {
-    const gain = 8 + Math.floor((state.attributes?.comprehension ?? 20) / 10);
+  }
+
+  if (!scene && (input.includes("闭关") || input.includes("修炼"))) {
+    const baseGain = 8 + Math.floor((state.attributes?.comprehension ?? 20) / 10);
+    const buffGain = state.focusBuffTurns > 0 ? 10 : 0;
+    const gain = baseGain + buffGain;
     state.cultivationCurrent += gain;
     state.mp = Math.max(40, state.mp - 8);
+    if (state.focusBuffTurns > 0) state.focusBuffTurns -= 1;
     state.goal = "[闭关清修] 累积真元，冲击下一小境界";
     const logs = advanceSmallStages(state);
     scene = `静室之中，灵息绵长，修为增长 ${gain}。${logs.join(" ")}`;
-  } else if (input.includes("坊市") || input.includes("交易") || input.includes("买")) {
+    state.pillToxicity = Math.max(0, state.pillToxicity - 2);
+  }
+
+  if (!scene && (input.includes("坊市") || input.includes("交易") || input.includes("买"))) {
     state.spiritStone = Math.max(0, state.spiritStone - 12);
     state.mp = Math.min(100, state.mp + 5);
     state.goal = "[坊市周旋] 收集丹药与突破材料线索";
     scene = "坊市人潮拥挤，几番试探后换得一份可疑线图，灵石消耗 12。";
-  } else {
+  }
+
+  if (!scene) {
     const gainStone = 10 + Math.floor((state.attributes?.fortune ?? 20) / 10);
     state.spiritStone += gainStone;
     state.hp = Math.max(65, state.hp - 6);
     state.goal = "[外出历练] 扩展地图并寻找遗府传闻";
+    scene = `山道多雾，沿途斩除低阶妖兽，收得灵石 ${gainStone}。`;
+  }
 
-    if (state.plane === "human" && !state.spiritEyeAccess && state.realm.startsWith("结丹") && (state.attributes?.fortune ?? 0) >= 20) {
-      state.spiritEyeAccess = true;
-      scene = `山道多雾，沿途斩除低阶妖兽，收得灵石 ${gainStone}，并在古碑后获得通天灵眼令牌。`;
-    } else {
-      scene = `山道多雾，沿途斩除低阶妖兽，收得灵石 ${gainStone}。`;
-    }
+  if (state.pillToxicity >= 100) {
+    state.hp = Math.max(1, state.hp - 20);
+    state.mp = Math.max(1, state.mp - 20);
+    state.focusBuffTurns = 0;
+    state.pillToxicity = 60;
+    scene += " 丹毒反噬骤起，气血与法力受损。";
   }
 
   const worldLogs = evolveWorld(state, detectActionTag(input, usedMajorBreakthrough));
@@ -494,24 +703,25 @@ export function resolveXianxiaTurn(state: XianxiaState, text: string): XianxiaRe
     state.worldEvent.finaleMediaEmitted = true;
     worldLogs.push("宗门战争已至终末，胜负将于此役分晓。");
   }
-  const worldLine = worldLogs.join(" ");
 
   const reply = [
     ...media,
     scene,
-    worldLine,
+    worldLogs.join(" "),
     "> A. 继续闭关",
     "> B. 回坊市补给",
     "> C. 深入野外历练",
-    "> D. 尝试筑基 / 尝试结丹 / 尝试元婴 / 尝试化神 / 尝试飞升",
-    "> E. 购买筑基丹 / 购买悟道之物 / 尝试凝印",
+    "> D. 炼制纳气丹 / 回春丹 / 凝神丹",
+    "> E. 服用纳气丹 / 回春丹 / 凝神丹",
     buildStatusIni(state),
   ].join("\n\n");
 
-  return finalizeReply(
+  return finalize(
     state,
     reply,
-    ["继续闭关", "回坊市", "深入历练", "尝试筑基", "尝试结丹", "尝试元婴", "尝试化神", "尝试飞升"],
+    ["继续闭关", "回坊市", "深入历练", "炼制纳气丹", "服用纳气丹", "服用回春丹", "服用凝神丹", "尝试筑基", "尝试结丹"],
     media,
+    [],
+    usedMajorBreakthrough ? "breakthrough" : undefined,
   );
 }

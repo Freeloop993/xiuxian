@@ -10,6 +10,11 @@ CREATE TABLE IF NOT EXISTS user_identities (
   PRIMARY KEY (channel, channel_user_id)
 );
 
+CREATE TABLE IF NOT EXISTS user_global_identities (
+  global_user_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS user_modes (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   mode TEXT NOT NULL CHECK (mode IN ('lobster','xianxia')),

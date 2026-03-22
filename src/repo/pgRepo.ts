@@ -49,6 +49,24 @@ function defaultXianxiaState(userId: string): XianxiaState {
       墨雨: 0,
       叶清霜: 0,
     },
+    avatar: {
+      preset: null,
+    },
+    pills: {
+      nourishQi: 1,
+      heal: 1,
+      focus: 0,
+    },
+    lastPillQuality: "无",
+    pillToxicity: 0,
+    focusBuffTurns: 0,
+    idle: {
+      active: false,
+      startedAt: null,
+      endsAt: null,
+      scene: null,
+      reminderSentAt: null,
+    },
   };
 }
 
@@ -89,11 +107,36 @@ export class PgRepo implements GameRepo {
   }
 
   async getOrCreateUser(identity: SessionIdentity): Promise<string> {
+    const globalId = identity.globalUserId?.trim();
+    if (globalId) {
+      const globalFound = await this.pool.query<{ user_id: string }>(
+        "SELECT user_id FROM user_global_identities WHERE global_user_id = $1",
+        [globalId],
+      );
+      if (globalFound.rowCount && globalFound.rows[0]) {
+        const userId = globalFound.rows[0].user_id;
+        await this.pool.query(
+          "INSERT INTO user_identities(channel, channel_user_id, user_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
+          [identity.channel, identity.channelUserId, userId],
+        );
+        return userId;
+      }
+    }
+
     const found = await this.pool.query<{ user_id: string }>(
       "SELECT user_id FROM user_identities WHERE channel = $1 AND channel_user_id = $2",
       [identity.channel, identity.channelUserId],
     );
-    if (found.rowCount && found.rows[0]) return found.rows[0].user_id;
+    if (found.rowCount && found.rows[0]) {
+      const userId = found.rows[0].user_id;
+      if (globalId) {
+        await this.pool.query(
+          "INSERT INTO user_global_identities(global_user_id, user_id) VALUES($1,$2) ON CONFLICT(global_user_id) DO NOTHING",
+          [globalId, userId],
+        );
+      }
+      return userId;
+    }
 
     const userId = randomUUID();
     await this.pool.query("INSERT INTO users(id) VALUES($1)", [userId]);
@@ -102,8 +145,19 @@ export class PgRepo implements GameRepo {
       identity.channelUserId,
       userId,
     ]);
+    if (globalId) {
+      await this.pool.query("INSERT INTO user_global_identities(global_user_id, user_id) VALUES($1,$2)", [globalId, userId]);
+    }
     await this.pool.query("INSERT INTO user_modes(user_id, mode) VALUES($1, 'lobster')", [userId]);
     return userId;
+  }
+
+  async getUserIdentities(userId: string): Promise<SessionIdentity[]> {
+    const res = await this.pool.query<{ channel: SessionIdentity["channel"]; channel_user_id: string }>(
+      "SELECT channel, channel_user_id FROM user_identities WHERE user_id = $1",
+      [userId],
+    );
+    return res.rows.map((r) => ({ channel: r.channel, channelUserId: r.channel_user_id }));
   }
 
   async getMode(userId: string): Promise<GameMode> {
@@ -152,6 +206,18 @@ export class PgRepo implements GameRepo {
       "INSERT INTO xianxia_states(user_id, state) VALUES($1,$2::jsonb) ON CONFLICT(user_id) DO UPDATE SET state = EXCLUDED.state, updated_at = NOW()",
       [state.userId, JSON.stringify(state)],
     );
+  }
+
+  async listDueIdleXianxiaStates(nowIso: string): Promise<XianxiaState[]> {
+    const res = await this.pool.query<{ state: XianxiaState }>(
+      `SELECT state FROM xianxia_states
+       WHERE (state->'idle'->>'active') = 'true'
+         AND (state->'idle'->>'endsAt') IS NOT NULL
+         AND ((state->'idle'->>'endsAt')::timestamptz <= $1::timestamptz)
+         AND (state->'idle'->>'reminderSentAt') IS NULL`,
+      [nowIso],
+    );
+    return res.rows.map((r) => r.state as XianxiaState);
   }
 
   async isDuplicate(key: string): Promise<boolean> {
