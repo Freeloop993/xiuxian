@@ -1,0 +1,92 @@
+﻿[
+  {
+    "id": "evt_workshop_shift_01",
+    "action": "work",
+    "location": "workshop",
+    "weight": 5,
+    "conditions": { "min_energy": 3 },
+    "effects": { "gold": 3, "energy": -2, "mood": -1 },
+    "text": "你在工坊忙了一整班，钳子都磨出火花，赚到一笔工钱。"
+  },
+  {
+    "id": "evt_workshop_bonus_01",
+    "action": "work",
+    "location": "workshop",
+    "weight": 2,
+    "conditions": { "min_social": 5 },
+    "effects": { "gold": 5, "energy": -2, "mood": 0 },
+    "text": "老板记得你上次帮忙，今天给了你额外奖金。"
+  },
+  {
+    "id": "evt_tavern_old_friend_01",
+    "action": "social",
+    "location": "tavern",
+    "weight": 4,
+    "conditions": {},
+    "effects": { "social": 2, "mood": 2, "energy": -1 },
+    "text": "你在酒馆遇到老朋友，聊到海风都停了。"
+  },
+  {
+    "id": "evt_home_nap_01",
+    "action": "rest",
+    "location": "home",
+    "weight": 5,
+    "conditions": {},
+    "effects": { "energy": 3, "mood": 1 },
+    "text": "你在家里打了个盹，精神恢复了不少。"
+  },
+  {
+    "id": "evt_beach_shell_game_01",
+    "action": "fun",
+    "location": "beach",
+    "weight": 3,
+    "conditions": { "min_gold": 1 },
+    "effects": { "mood": 2, "gold": -1, "energy": -1 },
+    "text": "你在海边玩了几局贝壳小游戏，笑到停不下来。"
+  },
+  {
+    "id": "evt_arena_trial_01",
+    "action": "adventure",
+    "location": "arena",
+    "weight": 4,
+    "conditions": { "min_energy": 4 },
+    "effects": { "explore": 2, "gold": 1, "energy": -2 },
+    "text": "你在竞技场参加试炼，虽然累但收获了经验和奖励。"
+  },
+  {
+    "id": "evt_beach_storm_01",
+    "action": "adventure",
+    "location": "beach",
+    "weight": 2,
+    "conditions": { "min_explore": 4 },
+    "effects": { "explore": 1, "mood": -1, "energy": -2 },
+    "text": "海边突起风浪，你勉强完成探索，心里有点后怕。"
+  },
+  {
+    "id": "evt_tavern_card_night_01",
+    "action": "fun",
+    "location": "tavern",
+    "weight": 3,
+    "conditions": { "min_social": 3 },
+    "effects": { "mood": 2, "social": 1, "gold": -1 },
+    "text": "酒馆的卡牌夜开始了，你和大家玩得很尽兴。"
+  },
+  {
+    "id": "evt_home_midnight_thought_01",
+    "action": "rest",
+    "location": "home",
+    "weight": 2,
+    "conditions": { "timeslot": "night" },
+    "effects": { "energy": 2, "mood": 1, "explore": 1 },
+    "text": "夜深时你写下了明天计划，休息中也多了点探索欲。"
+  },
+  {
+    "id": "evt_workshop_help_npc_01",
+    "action": "work",
+    "location": "workshop",
+    "weight": 2,
+    "conditions": { "min_mood": 5 },
+    "effects": { "gold": 2, "social": 1, "energy": -1 },
+    "text": "你顺手帮新人修好工具，虽然少赚一点，但交到了朋友。"
+  }
+]

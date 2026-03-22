@@ -1,0 +1,67 @@
+﻿{
+  "mode": "xianxia",
+  "version": "0.1.0",
+  "language": "zh-CN",
+  "hard_rules": {
+    "output_language": "简体中文",
+    "ending_gate": "未达到道祖大圆满不得输出终局文案",
+    "plane_restriction": "位面知识不可越级泄露",
+    "realm_consistency": "身份与能力必须匹配当前境界与位面",
+    "content_style": "亲密关系仅允许意象化和玄学化表达"
+  },
+  "planes": {
+    "human": {
+      "max_main_realm": "化神期·大圆满",
+      "next_plane": "灵界"
+    },
+    "spirit": {
+      "max_main_realm": "大乘期·大圆满",
+      "next_plane": "仙界"
+    },
+    "immortal": {
+      "max_main_realm": "道祖·大圆满",
+      "next_plane": null
+    }
+  },
+  "battle": {
+    "counter_bonus_percent": 20,
+    "counter_penalty_percent": 20,
+    "level_crush_rules": {
+      "plus_1_2": "轻微压制",
+      "plus_3_4": "可稳定破防",
+      "plus_5_6": "可破全力防御",
+      "plus_10": "可轻易秒杀"
+    }
+  },
+  "economy": {
+    "exchange": {
+      "1_mid": "100_low",
+      "1_high": "100_mid",
+      "1_top": "100_high"
+    },
+    "core_uses": ["修炼", "驱阵", "炼器炼丹", "驱动法宝"]
+  },
+  "state_panel": {
+    "format": "single_ini_block",
+    "required_fields": [
+      "名号",
+      "境界",
+      "肉身",
+      "神识",
+      "修为",
+      "道印",
+      "功法",
+      "物品",
+      "资产",
+      "状态",
+      "煞气",
+      "目标",
+      "灵兽",
+      "关系"
+    ]
+  },
+  "mode_commands": {
+    "enter": ["切换修仙", "/mode xianxia"],
+    "exit": ["切换龙虾", "/mode lobster"]
+  }
+}
